@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vercel dev",
-    "build": "echo 'Build complete'",
+    "build": "mkdir -p public && echo 'API Ready' > public/index.html",
     "deploy": "vercel --prod"
   },
   "dependencies": {
