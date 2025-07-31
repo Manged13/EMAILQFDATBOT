@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "functions": {
+    "api/**/*.js": {
+      "maxDuration": 30
+    }
+  },
+  "build": {
+    "env": {
+      "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD": "1"
+    }
+  },
+  "env": {
+    "QUOTEFACTORY_USERNAME": "@quotefactory-username",
+    "QUOTEFACTORY_PASSWORD": "@quotefactory-password"
+  }
+}
