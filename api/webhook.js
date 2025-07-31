@@ -1,8 +1,73 @@
-// api/webhook.js - Simplified version without QuoteFactory integration
+// api/webhook.js - Enhanced version with QuoteFactory scraping
+import { chromium } from 'playwright-core';
+import chromiumPkg from '@sparticuz/chromium';
 
-class LoadAutomationSimple {
+class LoadAutomationEnhanced {
     constructor() {
-        // No browser needed for this version
+        this.browser = null;
+        this.context = null;
+        this.page = null;
+    }
+
+    async initialize() {
+        try {
+            console.log('🚀 Initializing browser for QuoteFactory...');
+            
+            this.browser = await chromium.launch({
+                args: [
+                    ...chromiumPkg.args,
+                    '--no-sandbox', 
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--single-process'
+                ],
+                defaultViewport: chromiumPkg.defaultViewport,
+                executablePath: await chromiumPkg.executablePath(),
+                headless: chromiumPkg.headless,
+                ignoreHTTPSErrors: true,
+            });
+            
+            this.context = await this.browser.newContext({
+                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            });
+            
+            this.page = await this.context.newPage();
+            
+            // Block heavy resources to save memory and time
+            await this.page.route('**/*', (route) => {
+                const url = route.request().url();
+                const resourceType = route.request().resourceType();
+                
+                // Allow QuoteFactory and Auth0 domains
+                if (url.includes('quotefactory.com') || url.includes('auth0.com')) {
+                    route.continue();
+                } else if (['image', 'font', 'stylesheet'].includes(resourceType)) {
+                    route.abort();
+                } else {
+                    route.continue();
+                }
+            });
+            
+            console.log('✅ Browser initialized successfully');
+            return true;
+            
+        } catch (error) {
+            console.error('❌ Failed to initialize browser:', error);
+            return false;
+        }
+    }
+
+    async cleanup() {
+        try {
+            if (this.page) await this.page.close();
+            if (this.context) await this.context.close();
+            if (this.browser) await this.browser.close();
+            console.log('✅ Browser cleanup completed');
+        } catch (error) {
+            console.error('❌ Cleanup error:', error);
+        }
     }
 
     extractLoadReference(emailBody) {
@@ -57,24 +122,204 @@ class LoadAutomationSimple {
         return null;
     }
 
-    formatResponse(loadReference, subject, originalEmail) {
-        if (loadReference) {
+    async loginToQuoteFactory() {
+        try {
+            console.log('🔐 Starting QuoteFactory login...');
+            
+            const username = process.env.QUOTEFACTORY_USERNAME;
+            const password = process.env.QUOTEFACTORY_PASSWORD;
+            
+            if (!username || !password) {
+                console.log('❌ No QuoteFactory credentials found');
+                return false;
+            }
+            
+            // Set timeouts for serverless environment
+            this.page.setDefaultTimeout(20000);
+            this.page.setDefaultNavigationTimeout(20000);
+            
+            await this.page.goto('https://app.quotefactory.com', {
+                waitUntil: 'domcontentloaded',
+                timeout: 20000
+            });
+            
+            console.log('Current URL:', this.page.url());
+            
+            // Check if already logged in
+            if (this.page.url().includes('/broker/dashboard')) {
+                console.log('✅ Already on dashboard!');
+                return true;
+            }
+            
+            console.log('🔄 Need to perform login...');
+            await this.page.waitForTimeout(3000);
+            
+            try {
+                // Try multiple login methods
+                let loginSuccess = false;
+                
+                // Method 1: Direct form fields
+                try {
+                    const emailField = await this.page.waitForSelector('input[type="email"], input[name="username"]', { timeout: 10000 });
+                    const passwordField = await this.page.waitForSelector('input[type="password"]', { timeout: 5000 });
+                    
+                    if (emailField && passwordField) {
+                        console.log('📝 Filling credentials...');
+                        await emailField.fill(username);
+                        await passwordField.fill(password);
+                        await this.page.keyboard.press('Enter');
+                        loginSuccess = true;
+                    }
+                } catch (e) {
+                    console.log('⚠️ Direct form method failed:', e.message);
+                }
+                
+                // Method 2: Auth0 iframe
+                if (!loginSuccess) {
+                    try {
+                        console.log('🔍 Trying Auth0 iframe...');
+                        const authFrame = this.page.frameLocator('iframe[src*="auth0.com"]');
+                        const emailField = authFrame.getByLabel(/email/i).first();
+                        const passwordField = authFrame.getByLabel(/password/i).first();
+                        
+                        await emailField.fill(username);
+                        await passwordField.fill(password);
+                        await passwordField.press('Enter');
+                        loginSuccess = true;
+                    } catch (e) {
+                        console.log('⚠️ Auth0 iframe method failed:', e.message);
+                    }
+                }
+                
+                if (!loginSuccess) {
+                    console.log('❌ All login methods failed');
+                    return false;
+                }
+                
+                // Wait for login completion
+                console.log('⏳ Waiting for login to complete...');
+                await this.page.waitForTimeout(8000);
+                
+                const currentUrl = this.page.url();
+                console.log('Post-login URL:', currentUrl);
+                
+                if (currentUrl.includes('/broker/dashboard') || currentUrl.includes('/dashboard')) {
+                    console.log('✅ Login successful!');
+                    return true;
+                } else {
+                    console.log('❌ Login may have failed - not on dashboard');
+                    return false;
+                }
+                
+            } catch (loginError) {
+                console.log('❌ Login process failed:', loginError.message);
+                return false;
+            }
+            
+        } catch (error) {
+            console.error('❌ QuoteFactory login failed:', error.message);
+            return false;
+        }
+    }
+
+    async searchLoadInfo(loadReference) {
+        try {
+            console.log(`🔍 Searching for load: ${loadReference}`);
+            
+            // Try keyboard shortcut search
+            await this.page.keyboard.press('/');
+            await this.page.waitForTimeout(2000);
+            
+            const searchInput = await this.page.$('input[type="text"]:focus');
+            if (searchInput) {
+                console.log('✅ Search input found');
+                await searchInput.fill(loadReference);
+                await this.page.waitForTimeout(4000);
+                
+                // Try to click on result or press Enter
+                try {
+                    await this.page.click(`text="${loadReference}"`, { timeout: 5000 });
+                } catch (e) {
+                    await this.page.keyboard.press('Enter');
+                }
+                
+                await this.page.waitForTimeout(6000);
+                
+                // Extract load information
+                const loadData = await this.page.evaluate(() => {
+                    const text = document.body.textContent || '';
+                    
+                    // Look for pickup/delivery info
+                    const locationMatches = text.match(/([A-Za-z\s]+),\s*([A-Z]{2})/g) || [];
+                    const weightMatches = text.match(/(\d{1,3}(?:,\d{3})*)\s*(lbs?|pounds?)/gi) || [];
+                    const rateMatches = text.match(/\$(\d{1,2}(?:,\d{3})*)/g) || [];
+                    
+                    return {
+                        locations: locationMatches.slice(0, 2), // First 2 are usually pickup/delivery
+                        weights: weightMatches,
+                        rates: rateMatches,
+                        hasData: text.length > 1000 && locationMatches.length > 0
+                    };
+                });
+                
+                if (loadData.hasData) {
+                    console.log('✅ Load data found successfully');
+                    return {
+                        pickup: loadData.locations[0] || 'Pickup TBD',
+                        delivery: loadData.locations[1] || 'Delivery TBD', 
+                        weight: loadData.weights[0] || 'Weight TBD',
+                        rate: loadData.rates[0] || 'Rate TBD'
+                    };
+                } else {
+                    console.log('⚠️ Load found but limited data available');
+                    return null;
+                }
+            }
+            
+            console.log('❌ Could not find search input');
+            return null;
+            
+        } catch (error) {
+            console.error('❌ Load search failed:', error.message);
+            return null;
+        }
+    }
+
+    formatResponse(loadReference, loadInfo, subject, originalEmail) {
+        if (loadInfo) {
             return `Subject: Re: ${subject}
 
 Hello,
 
-Thank you for your load inquiry regarding reference ${loadReference}.
+Thank you for your inquiry about load ${loadReference}. Here are the details:
 
-I'm pulling the detailed information from our system now and will send you complete pickup/delivery details, commodity info, and our competitive rate within the next few minutes.
+📦 LOAD DETAILS:
+- Pickup: ${loadInfo.pickup}
+- Delivery: ${loadInfo.delivery}
+- Weight: ${loadInfo.weight}
+- Rate: ${loadInfo.rate}
 
-🚛 QUICK QUESTION: When and where will you be empty for pickup?
+🚛 CAPACITY INQUIRY:
+When and where will you be empty for pickup?
 
 Best regards,
 Balto Booking
 
 ---
-Original Message:
-${originalEmail.substring(0, 200)}...
+Automated response with live QuoteFactory data`;
+        } else if (loadReference) {
+            return `Subject: Re: ${subject}
+
+Hello,
+
+Thank you for your inquiry regarding load ${loadReference}.
+
+I found the load reference in our system and am pulling the detailed information now. I'll send you complete pickup/delivery details, commodity info, and our competitive rate within the next few minutes.
+
+🚛 QUICK QUESTION: When and where will you be empty for pickup?
+
+Best regards,
+Balto Booking
 
 ---
 Automated response system`;
@@ -88,7 +333,7 @@ Thank you for reaching out about this load opportunity.
 To provide you with accurate pricing and availability, could you please provide the DAT load reference number or QuoteFactory load ID?
 
 This will help us:
-- Pull the exact load details from our system
+- Pull the exact load details from our system  
 - Provide you with competitive pricing
 - Respond faster with availability
 
@@ -98,10 +343,6 @@ Thank you!
 
 Best regards,
 Balto Booking
-
----
-Original Message:
-${originalEmail.substring(0, 200)}...
 
 ---
 Automated response - Please reply with DAT reference number`;
@@ -115,10 +356,10 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const automation = new LoadAutomationSimple();
+    const automation = new LoadAutomationEnhanced();
     
     try {
-        console.log('=== Processing New Email ===');
+        console.log('=== Processing Email with QuoteFactory Integration ===');
         console.log('Subject:', req.body.subject);
         console.log('Body Preview:', req.body.bodyPreview?.substring(0, 200));
         
@@ -131,31 +372,64 @@ export default async function handler(req, res) {
         
         const loadReference = automation.extractLoadReference(emailContent);
         
-        const responseEmail = automation.formatResponse(loadReference, subject, emailContent);
+        let loadInfo = null;
+        
+        if (loadReference) {
+            console.log(`✅ Found load reference: ${loadReference}`);
+            
+            // Only attempt QuoteFactory lookup if credentials are available
+            const hasCredentials = process.env.QUOTEFACTORY_USERNAME && process.env.QUOTEFACTORY_PASSWORD;
+            
+            if (hasCredentials) {
+                console.log('🔐 Credentials found, attempting QuoteFactory lookup...');
+                
+                const browserReady = await automation.initialize();
+                if (browserReady) {
+                    const loginSuccess = await automation.loginToQuoteFactory();
+                    if (loginSuccess) {
+                        loadInfo = await automation.searchLoadInfo(loadReference);
+                    }
+                    await automation.cleanup();
+                }
+            } else {
+                console.log('⚠️ No QuoteFactory credentials - using basic response');
+            }
+        }
+        
+        const responseEmail = automation.formatResponse(loadReference, loadInfo, subject, emailContent);
         
         return res.status(200).json({
             success: true,
             loadReference: loadReference || null,
+            loadInfo: loadInfo || null,
             responseEmail,
             replyToEmailId: emailId,
             timestamp: new Date().toISOString(),
-            mode: 'simplified'
+            mode: 'enhanced',
+            quotefactoryUsed: !!(loadInfo)
         });
         
     } catch (error) {
         console.error('❌ Webhook error:', error);
         
-        const responseEmail = automation.formatResponse(null, 'Load Inquiry', 'Error processing email');
+        await automation.cleanup();
+        
+        const fallbackResponse = `Subject: Re: Load Inquiry
+
+Thank you for your email. We're processing your inquiry and will respond shortly with load details.
+
+Best regards,
+Balto Booking`;
         
         return res.status(200).json({
             success: true,
-            message: 'Error processing',
-            responseEmail,
+            message: 'Error processing - fallback response',
+            responseEmail: fallbackResponse,
             timestamp: new Date().toISOString()
         });
     }
 }
 
 export const config = {
-    maxDuration: 10,
+    maxDuration: 30,
 };
