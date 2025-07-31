@@ -1,4 +1,4 @@
-// api/webhook.js - Enhanced version with QuoteFactory scraping
+// api/webhook.js - Fixed browser initialization
 import { chromium } from 'playwright-core';
 import chromiumPkg from '@sparticuz/chromium';
 
@@ -13,19 +13,14 @@ class LoadAutomationEnhanced {
         try {
             console.log('🚀 Initializing browser for QuoteFactory...');
             
+            // Get the executable path first
+            const executablePath = await chromiumPkg.executablePath();
+            
             this.browser = await chromium.launch({
-                args: [
-                    ...chromiumPkg.args,
-                    '--no-sandbox', 
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--no-first-run',
-                    '--no-zygote',
-                    '--single-process'
-                ],
+                args: chromiumPkg.args,
                 defaultViewport: chromiumPkg.defaultViewport,
-                executablePath: await chromiumPkg.executablePath(),
-                headless: chromiumPkg.headless,
+                executablePath: executablePath,
+                headless: true, // Fixed: use boolean instead of chromiumPkg.headless
                 ignoreHTTPSErrors: true,
             });
             
@@ -398,15 +393,23 @@ export default async function handler(req, res) {
         
         const responseEmail = automation.formatResponse(loadReference, loadInfo, subject, emailContent);
         
+        // Parse the response email to extract subject and body
+        const emailLines = responseEmail.split('\n');
+        const subjectLine = emailLines[0].replace('Subject: ', '');
+        const bodyContent = emailLines.slice(2).join('\n'); // Skip subject and empty line
+        
         return res.status(200).json({
             success: true,
             loadReference: loadReference || null,
             loadInfo: loadInfo || null,
-            responseEmail,
+            responseSubject: subjectLine,
+            responseBody: bodyContent,
+            responseEmail: responseEmail,
+            quotefactoryAttempted: !!(loadReference && hasCredentials),
+            quotefactorySuccess: !!(loadInfo),
             replyToEmailId: emailId,
             timestamp: new Date().toISOString(),
-            mode: 'enhanced',
-            quotefactoryUsed: !!(loadInfo)
+            mode: 'enhanced'
         });
         
     } catch (error) {
