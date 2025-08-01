@@ -16,9 +16,16 @@ class LoadAutomationEnhanced {
             if (process.env.BROWSERLESS_TOKEN) {
                 // Strategy 1: Use Browserless.io service
                 console.log('🌐 Using Browserless.io service...');
-                this.browser = await puppeteer.connect({
-                    browserWSEndpoint: `wss://chrome.browserless.io?token=${process.env.BROWSERLESS_TOKEN}`,
-                });
+                console.log('Token length:', process.env.BROWSERLESS_TOKEN.length);
+                try {
+                    this.browser = await puppeteer.connect({
+                        browserWSEndpoint: `wss://chrome.browserless.io?token=${process.env.BROWSERLESS_TOKEN}`,
+                    });
+                } catch (browserlessError) {
+                    console.log('❌ Browserless.io failed, trying alternative...');
+                    // Fallback to local chromium
+                    throw browserlessError;
+                }
             } else {
                 // Strategy 2: Try local chromium
                 const isLocal = !!process.env.CHROME_BIN || !!process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD;
