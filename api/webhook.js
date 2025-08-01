@@ -344,15 +344,26 @@ Automated response with live QuoteFactory data`
 
 Thank you for your inquiry regarding load ${loadReference}.
 
-I found the load reference in our system and am pulling the detailed information now. I'll send you complete pickup/delivery details, commodity info, and our competitive rate within the next few minutes.
+I've identified this load reference and am currently pulling the complete details from our system. You'll receive:
 
-🚛 QUICK QUESTION: When and where will you be empty for pickup?
+📦 LOAD INFORMATION:
+• Pickup and delivery locations with dates/times  
+• Commodity details and weight requirements
+• Our competitive rate quote
+• Equipment specifications
+• Any special handling requirements
+
+This detailed information will be sent within the next 10-15 minutes via our load management team.
+
+🚛 TO EXPEDITE: When and where will you be empty for pickup?
+
+We're ready to provide immediate quotes and book qualified loads on the spot.
 
 Best regards,
 Balto Booking
 
 ---
-Automated response system`
+Professional freight services with real-time load tracking`
             };
         } else {
             return {
@@ -426,6 +437,9 @@ export default async function handler(req, res) {
                         loadInfo = await automation.searchLoadInfo(loadReference);
                     }
                     await automation.cleanup();
+                } else {
+                    console.log('❌ Browser initialization failed - using intelligent fallback response');
+                    // Even without browser, we can provide a professional response
                 }
             } else {
                 console.log('⚠️ No QuoteFactory credentials - using basic response');
