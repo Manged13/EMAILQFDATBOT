@@ -1,4 +1,4 @@
-// api/webhook.js - Using Puppeteer with @sparticuz/chromium for better Vercel compatibility
+// api/webhook.js - Fixed Puppeteer with @sparticuz/chromium
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 
@@ -12,13 +12,29 @@ class LoadAutomationEnhanced {
         try {
             console.log('🚀 Initializing browser for QuoteFactory...');
             
-            this.browser = await puppeteer.launch({
-                args: chromium.args,
-                defaultViewport: chromium.defaultViewport,
-                executablePath: await chromium.executablePath('/opt/nodejs/node_modules/@sparticuz/chromium/bin'),
-                headless: chromium.headless,
-                ignoreHTTPSErrors: true,
-            });
+            // Configure for Vercel serverless environment
+            const isLocal = !!process.env.CHROME_BIN || !!process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD;
+            
+            let launchOptions;
+            
+            if (isLocal) {
+                // Local development
+                launchOptions = {
+                    headless: true,
+                    args: ['--no-sandbox', '--disable-setuid-sandbox']
+                };
+            } else {
+                // Vercel production
+                launchOptions = {
+                    args: chromium.args,
+                    defaultViewport: chromium.defaultViewport,
+                    executablePath: await chromium.executablePath(), // Don't specify path
+                    headless: chromium.headless,
+                    ignoreHTTPSErrors: true,
+                };
+            }
+            
+            this.browser = await puppeteer.launch(launchOptions);
             
             this.page = await this.browser.newPage();
             
@@ -235,7 +251,9 @@ class LoadAutomationEnhanced {
                 await this.page.waitForTimeout(4000);
                 
                 try {
-                    await this.page.click(`text=${loadReference}`, { timeout: 5000 });
+                    // Try to click on the search result
+                    const resultSelector = `[role="button"]:has-text("${loadReference}"), a:has-text("${loadReference}"), div:has-text("${loadReference}")`;
+                    await this.page.click(resultSelector, { timeout: 5000 });
                 } catch (e) {
                     await this.page.keyboard.press('Enter');
                 }
@@ -255,9 +273,12 @@ class LoadAutomationEnhanced {
                         locations: locationMatches.slice(0, 2),
                         weights: weightMatches,
                         rates: rateMatches,
-                        hasData: text.length > 1000 && locationMatches.length > 0
+                        hasData: text.length > 1000 && locationMatches.length > 0,
+                        textLength: text.length
                     };
                 });
+                
+                console.log(`Page text length: ${loadData.textLength}, Locations found: ${loadData.locations.length}`);
                 
                 if (loadData.hasData) {
                     console.log('✅ Load data found successfully');
@@ -359,7 +380,7 @@ export default async function handler(req, res) {
     const automation = new LoadAutomationEnhanced();
     
     try {
-        console.log('=== Processing Email with Puppeteer QuoteFactory Integration ===');
+        console.log('=== Processing Email with Fixed Puppeteer Integration ===');
         console.log('Subject:', req.body.subject);
         console.log('Body Preview:', req.body.bodyPreview?.substring(0, 200));
         
@@ -408,7 +429,7 @@ export default async function handler(req, res) {
             quotefactorySuccess: !!(loadInfo),
             replyToEmailId: emailId,
             timestamp: new Date().toISOString(),
-            mode: 'puppeteer-enhanced'
+            mode: 'puppeteer-fixed'
         });
         
     } catch (error) {
