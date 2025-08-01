@@ -1,4 +1,4 @@
-// api/webhook.js - Enhanced version with QuoteFactory scraping
+// api/webhook.js - Fixed browser initialization for @sparticuz/chromium
 import { chromium } from 'playwright-core';
 import chromiumPkg from '@sparticuz/chromium';
 
@@ -13,19 +13,21 @@ class LoadAutomationEnhanced {
         try {
             console.log('🚀 Initializing browser for QuoteFactory...');
             
+            // Manual configuration to avoid @sparticuz/chromium property issues
             this.browser = await chromium.launch({
                 args: [
-                    ...chromiumPkg.args,
-                    '--no-sandbox', 
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
-                    '--disable-gpu',
+                    '--disable-accelerated-2d-canvas',
                     '--no-first-run',
                     '--no-zygote',
-                    '--single-process'
+                    '--single-process',
+                    '--disable-gpu'
                 ],
-                defaultViewport: chromiumPkg.defaultViewport,
+                defaultViewport: { width: 1280, height: 720 },
                 executablePath: await chromiumPkg.executablePath(),
-                headless: chromiumPkg.headless,
+                headless: true, // Always use boolean true
                 ignoreHTTPSErrors: true,
             });
             
@@ -40,7 +42,6 @@ class LoadAutomationEnhanced {
                 const url = route.request().url();
                 const resourceType = route.request().resourceType();
                 
-                // Allow QuoteFactory and Auth0 domains
                 if (url.includes('quotefactory.com') || url.includes('auth0.com')) {
                     route.continue();
                 } else if (['image', 'font', 'stylesheet'].includes(resourceType)) {
@@ -134,7 +135,6 @@ class LoadAutomationEnhanced {
                 return false;
             }
             
-            // Set timeouts for serverless environment
             this.page.setDefaultTimeout(20000);
             this.page.setDefaultNavigationTimeout(20000);
             
@@ -145,7 +145,6 @@ class LoadAutomationEnhanced {
             
             console.log('Current URL:', this.page.url());
             
-            // Check if already logged in
             if (this.page.url().includes('/broker/dashboard')) {
                 console.log('✅ Already on dashboard!');
                 return true;
@@ -155,7 +154,6 @@ class LoadAutomationEnhanced {
             await this.page.waitForTimeout(3000);
             
             try {
-                // Try multiple login methods
                 let loginSuccess = false;
                 
                 // Method 1: Direct form fields
@@ -196,7 +194,6 @@ class LoadAutomationEnhanced {
                     return false;
                 }
                 
-                // Wait for login completion
                 console.log('⏳ Waiting for login to complete...');
                 await this.page.waitForTimeout(8000);
                 
@@ -236,7 +233,6 @@ class LoadAutomationEnhanced {
                 await searchInput.fill(loadReference);
                 await this.page.waitForTimeout(4000);
                 
-                // Try to click on result or press Enter
                 try {
                     await this.page.click(`text="${loadReference}"`, { timeout: 5000 });
                 } catch (e) {
@@ -255,7 +251,7 @@ class LoadAutomationEnhanced {
                     const rateMatches = text.match(/\$(\d{1,2}(?:,\d{3})*)/g) || [];
                     
                     return {
-                        locations: locationMatches.slice(0, 2), // First 2 are usually pickup/delivery
+                        locations: locationMatches.slice(0, 2),
                         weights: weightMatches,
                         rates: rateMatches,
                         hasData: text.length > 1000 && locationMatches.length > 0
@@ -287,17 +283,17 @@ class LoadAutomationEnhanced {
 
     formatResponse(loadReference, loadInfo, subject, originalEmail) {
         if (loadInfo) {
-            return `Subject: Re: ${subject}
-
-Hello,
+            return {
+                subject: `Re: ${subject}`,
+                body: `Hello,
 
 Thank you for your inquiry about load ${loadReference}. Here are the details:
 
 📦 LOAD DETAILS:
-• Pickup: ${loadInfo.pickup}
-• Delivery: ${loadInfo.delivery}
-• Weight: ${loadInfo.weight}
-• Rate: ${loadInfo.rate}
+- Pickup: ${loadInfo.pickup}
+- Delivery: ${loadInfo.delivery}
+- Weight: ${loadInfo.weight}
+- Rate: ${loadInfo.rate}
 
 🚛 CAPACITY INQUIRY:
 When and where will you be empty for pickup?
@@ -306,11 +302,12 @@ Best regards,
 Balto Booking
 
 ---
-Automated response with live QuoteFactory data`;
+Automated response with live QuoteFactory data`
+            };
         } else if (loadReference) {
-            return `Subject: Re: ${subject}
-
-Hello,
+            return {
+                subject: `Re: ${subject}`,
+                body: `Hello,
 
 Thank you for your inquiry regarding load ${loadReference}.
 
@@ -322,11 +319,12 @@ Best regards,
 Balto Booking
 
 ---
-Automated response system`;
+Automated response system`
+            };
         } else {
-            return `Subject: Re: ${subject} - DAT Reference Number Needed
-
-Hello,
+            return {
+                subject: `Re: ${subject} - DAT Reference Number Needed`,
+                body: `Hello,
 
 Thank you for reaching out about this load opportunity.
 
@@ -345,7 +343,8 @@ Best regards,
 Balto Booking
 
 ---
-Automated response - Please reply with DAT reference number`;
+Automated response - Please reply with DAT reference number`
+            };
         }
     }
 }
@@ -366,19 +365,19 @@ export default async function handler(req, res) {
         const emailId = req.body.id;
         const subject = req.body.subject || 'Load Inquiry';
         const bodyPreview = req.body.bodyPreview || '';
-        const bodyContent = req.body.body?.content || '';
+        const emailBodyContent = req.body.body?.content || '';
         
-        const emailContent = bodyPreview || bodyContent || '';
+        const emailContent = bodyPreview || emailBodyContent || '';
         
         const loadReference = automation.extractLoadReference(emailContent);
         
         let loadInfo = null;
+        let hasCredentials = false;
         
         if (loadReference) {
             console.log(`✅ Found load reference: ${loadReference}`);
             
-            // Only attempt QuoteFactory lookup if credentials are available
-            const hasCredentials = process.env.QUOTEFACTORY_USERNAME && process.env.QUOTEFACTORY_PASSWORD;
+            hasCredentials = process.env.QUOTEFACTORY_USERNAME && process.env.QUOTEFACTORY_PASSWORD;
             
             if (hasCredentials) {
                 console.log('🔐 Credentials found, attempting QuoteFactory lookup...');
@@ -402,11 +401,13 @@ export default async function handler(req, res) {
             success: true,
             loadReference: loadReference || null,
             loadInfo: loadInfo || null,
-            responseEmail,
+            responseSubject: responseEmail.subject,
+            responseBody: responseEmail.body,
+            quotefactoryAttempted: !!(loadReference && hasCredentials),
+            quotefactorySuccess: !!(loadInfo),
             replyToEmailId: emailId,
             timestamp: new Date().toISOString(),
-            mode: 'enhanced',
-            quotefactoryUsed: !!(loadInfo)
+            mode: 'enhanced-fixed'
         });
         
     } catch (error) {
@@ -414,17 +415,11 @@ export default async function handler(req, res) {
         
         await automation.cleanup();
         
-        const fallbackResponse = `Subject: Re: Load Inquiry
-
-Thank you for your email. We're processing your inquiry and will respond shortly with load details.
-
-Best regards,
-Balto Booking`;
-        
         return res.status(200).json({
             success: true,
             message: 'Error processing - fallback response',
-            responseEmail: fallbackResponse,
+            responseSubject: 'Re: Load Inquiry',
+            responseBody: 'Thank you for your email. We are processing your inquiry and will respond shortly.',
             timestamp: new Date().toISOString()
         });
     }
