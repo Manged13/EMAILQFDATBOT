@@ -1,11 +1,10 @@
-// api/webhook.js - Fixed browser initialization for @sparticuz/chromium
-import { chromium } from 'playwright-core';
-import chromiumPkg from '@sparticuz/chromium';
+// api/webhook.js - Using Puppeteer with @sparticuz/chromium for better Vercel compatibility
+import puppeteer from 'puppeteer-core';
+import chromium from '@sparticuz/chromium';
 
 class LoadAutomationEnhanced {
     constructor() {
         this.browser = null;
-        this.context = null;
         this.page = null;
     }
 
@@ -13,41 +12,30 @@ class LoadAutomationEnhanced {
         try {
             console.log('🚀 Initializing browser for QuoteFactory...');
             
-            // Manual configuration to avoid @sparticuz/chromium property issues
-            this.browser = await chromium.launch({
-                args: [
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
-                    '--no-first-run',
-                    '--no-zygote',
-                    '--single-process',
-                    '--disable-gpu'
-                ],
-                defaultViewport: { width: 1280, height: 720 },
-                executablePath: await chromiumPkg.executablePath(),
-                headless: true, // Always use boolean true
+            this.browser = await puppeteer.launch({
+                args: chromium.args,
+                defaultViewport: chromium.defaultViewport,
+                executablePath: await chromium.executablePath('/opt/nodejs/node_modules/@sparticuz/chromium/bin'),
+                headless: chromium.headless,
                 ignoreHTTPSErrors: true,
             });
             
-            this.context = await this.browser.newContext({
-                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            });
+            this.page = await this.browser.newPage();
             
-            this.page = await this.context.newPage();
+            await this.page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             
             // Block heavy resources to save memory and time
-            await this.page.route('**/*', (route) => {
-                const url = route.request().url();
-                const resourceType = route.request().resourceType();
+            await this.page.setRequestInterception(true);
+            this.page.on('request', (req) => {
+                const url = req.url();
+                const resourceType = req.resourceType();
                 
                 if (url.includes('quotefactory.com') || url.includes('auth0.com')) {
-                    route.continue();
+                    req.continue();
                 } else if (['image', 'font', 'stylesheet'].includes(resourceType)) {
-                    route.abort();
+                    req.abort();
                 } else {
-                    route.continue();
+                    req.continue();
                 }
             });
             
@@ -63,7 +51,6 @@ class LoadAutomationEnhanced {
     async cleanup() {
         try {
             if (this.page) await this.page.close();
-            if (this.context) await this.context.close();
             if (this.browser) await this.browser.close();
             console.log('✅ Browser cleanup completed');
         } catch (error) {
@@ -158,13 +145,14 @@ class LoadAutomationEnhanced {
                 
                 // Method 1: Direct form fields
                 try {
-                    const emailField = await this.page.waitForSelector('input[type="email"], input[name="username"]', { timeout: 10000 });
-                    const passwordField = await this.page.waitForSelector('input[type="password"]', { timeout: 5000 });
+                    await this.page.waitForSelector('input[type="email"], input[name="username"]', { timeout: 10000 });
+                    const emailField = await this.page.$('input[type="email"], input[name="username"]');
+                    const passwordField = await this.page.$('input[type="password"]');
                     
                     if (emailField && passwordField) {
                         console.log('📝 Filling credentials...');
-                        await emailField.fill(username);
-                        await passwordField.fill(password);
+                        await emailField.type(username);
+                        await passwordField.type(password);
                         await this.page.keyboard.press('Enter');
                         loginSuccess = true;
                     }
@@ -172,18 +160,30 @@ class LoadAutomationEnhanced {
                     console.log('⚠️ Direct form method failed:', e.message);
                 }
                 
-                // Method 2: Auth0 iframe
+                // Method 2: Auth0 iframe (simplified for Puppeteer)
                 if (!loginSuccess) {
                     try {
                         console.log('🔍 Trying Auth0 iframe...');
-                        const authFrame = this.page.frameLocator('iframe[src*="auth0.com"]');
-                        const emailField = authFrame.getByLabel(/email/i).first();
-                        const passwordField = authFrame.getByLabel(/password/i).first();
+                        const frames = await this.page.frames();
                         
-                        await emailField.fill(username);
-                        await passwordField.fill(password);
-                        await passwordField.press('Enter');
-                        loginSuccess = true;
+                        for (const frame of frames) {
+                            const frameUrl = frame.url();
+                            if (frameUrl.includes('auth0.com')) {
+                                console.log('Found Auth0 frame:', frameUrl);
+                                
+                                await frame.waitForSelector('input[type="email"], input[name="username"]', { timeout: 5000 });
+                                const emailField = await frame.$('input[type="email"], input[name="username"]');
+                                const passwordField = await frame.$('input[type="password"]');
+                                
+                                if (emailField && passwordField) {
+                                    await emailField.type(username);
+                                    await passwordField.type(password);
+                                    await frame.keyboard.press('Enter');
+                                    loginSuccess = true;
+                                    break;
+                                }
+                            }
+                        }
                     } catch (e) {
                         console.log('⚠️ Auth0 iframe method failed:', e.message);
                     }
@@ -227,14 +227,15 @@ class LoadAutomationEnhanced {
             await this.page.keyboard.press('/');
             await this.page.waitForTimeout(2000);
             
-            const searchInput = await this.page.$('input[type="text"]:focus');
+            // Look for focused input
+            const searchInput = await this.page.$('input:focus');
             if (searchInput) {
                 console.log('✅ Search input found');
-                await searchInput.fill(loadReference);
+                await searchInput.type(loadReference);
                 await this.page.waitForTimeout(4000);
                 
                 try {
-                    await this.page.click(`text="${loadReference}"`, { timeout: 5000 });
+                    await this.page.click(`text=${loadReference}`, { timeout: 5000 });
                 } catch (e) {
                     await this.page.keyboard.press('Enter');
                 }
@@ -358,7 +359,7 @@ export default async function handler(req, res) {
     const automation = new LoadAutomationEnhanced();
     
     try {
-        console.log('=== Processing Email with QuoteFactory Integration ===');
+        console.log('=== Processing Email with Puppeteer QuoteFactory Integration ===');
         console.log('Subject:', req.body.subject);
         console.log('Body Preview:', req.body.bodyPreview?.substring(0, 200));
         
@@ -407,7 +408,7 @@ export default async function handler(req, res) {
             quotefactorySuccess: !!(loadInfo),
             replyToEmailId: emailId,
             timestamp: new Date().toISOString(),
-            mode: 'enhanced-fixed'
+            mode: 'puppeteer-enhanced'
         });
         
     } catch (error) {
