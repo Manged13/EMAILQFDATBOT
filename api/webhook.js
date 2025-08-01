@@ -24,11 +24,22 @@ class LoadAutomationEnhanced {
                     args: ['--no-sandbox', '--disable-setuid-sandbox']
                 };
             } else {
-                // Vercel production
+                // Vercel production with @sparticuz/chromium
+                await chromium.font('https://fonts.gstatic.com/s/roboto/v27/KFOmCnqEu92Fr1Mu4mxKKTU1Kg.woff2');
+                
                 launchOptions = {
-                    args: chromium.args,
+                    args: [
+                        ...chromium.args,
+                        '--disable-gpu',
+                        '--disable-dev-shm-usage',
+                        '--disable-setuid-sandbox',
+                        '--no-first-run',
+                        '--no-sandbox',
+                        '--no-zygote',
+                        '--single-process'
+                    ],
                     defaultViewport: chromium.defaultViewport,
-                    executablePath: await chromium.executablePath(), // Don't specify path
+                    executablePath: await chromium.executablePath(),
                     headless: chromium.headless,
                     ignoreHTTPSErrors: true,
                 };
