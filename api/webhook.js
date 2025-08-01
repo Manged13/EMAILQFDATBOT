@@ -12,29 +12,38 @@ class LoadAutomationEnhanced {
         try {
             console.log('🚀 Initializing browser for QuoteFactory...');
             
-            // Configure for Vercel serverless environment
-            const isLocal = !!process.env.CHROME_BIN || !!process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD;
-            
-            let launchOptions;
-            
-            if (isLocal) {
-                // Local development
-                launchOptions = {
-                    headless: true,
-                    args: ['--no-sandbox', '--disable-setuid-sandbox']
-                };
+            // Try multiple browser strategies
+            if (process.env.BROWSERLESS_TOKEN) {
+                // Strategy 1: Use Browserless.io service
+                console.log('🌐 Using Browserless.io service...');
+                this.browser = await puppeteer.connect({
+                    browserWSEndpoint: `wss://chrome.browserless.io?token=${process.env.BROWSERLESS_TOKEN}`,
+                });
             } else {
-                // Vercel production with @sparticuz/chromium - compatible version
-                launchOptions = {
-                    args: chromium.args,
-                    defaultViewport: chromium.defaultViewport,
-                    executablePath: await chromium.executablePath(),
-                    headless: chromium.headless,
-                    ignoreHTTPSErrors: true,
-                };
+                // Strategy 2: Try local chromium
+                const isLocal = !!process.env.CHROME_BIN || !!process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD;
+                
+                let launchOptions;
+                
+                if (isLocal) {
+                    // Local development
+                    launchOptions = {
+                        headless: true,
+                        args: ['--no-sandbox', '--disable-setuid-sandbox']
+                    };
+                } else {
+                    // Vercel production with @sparticuz/chromium
+                    launchOptions = {
+                        args: chromium.args,
+                        defaultViewport: chromium.defaultViewport,
+                        executablePath: await chromium.executablePath(),
+                        headless: chromium.headless,
+                        ignoreHTTPSErrors: true,
+                    };
+                }
+                
+                this.browser = await puppeteer.launch(launchOptions);
             }
-            
-            this.browser = await puppeteer.launch(launchOptions);
             
             this.page = await this.browser.newPage();
             
