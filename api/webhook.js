@@ -385,12 +385,15 @@ export default async function handler(req, res) {
         console.log('Subject:', req.body.subject);
         console.log('Body Preview:', req.body.bodyPreview?.substring(0, 200));
         
-        const emailId = req.body.id;
+        // Handle Zapier's data format - all data comes in req.body.JSON
+        const zapierData = req.body.JSON || '';
+        const emailId = req.body.id || 'unknown';
         const subject = req.body.subject || 'Load Inquiry';
         const bodyPreview = req.body.bodyPreview || '';
         const emailBodyContent = req.body.body?.content || '';
         
-        const emailContent = bodyPreview || emailBodyContent || '';
+        // Use Zapier data if available, otherwise fall back to structured data
+        const emailContent = zapierData || bodyPreview || emailBodyContent || '';
         
         const loadReference = automation.extractLoadReference(emailContent);
         
