@@ -381,6 +381,7 @@ export default async function handler(req, res) {
     
     try {
         console.log('=== Processing Email with Fixed Puppeteer Integration ===');
+        console.log('Full request body:', JSON.stringify(req.body, null, 2));
         console.log('Subject:', req.body.subject);
         console.log('Body Preview:', req.body.bodyPreview?.substring(0, 200));
         
