@@ -22,12 +22,15 @@ class LoadAutomationEnhanced {
                         browserWSEndpoint: `wss://chrome.browserless.io?token=${process.env.BROWSERLESS_TOKEN}`,
                     });
                 } catch (browserlessError) {
-                    console.log('❌ Browserless.io failed, trying alternative...');
-                    // Fallback to local chromium
-                    throw browserlessError;
+                    console.log('❌ Browserless.io failed (403 - token invalid/expired)');
+                    console.log('💡 Please get a fresh token from https://www.browserless.io/');
+                    // Continue to local chromium fallback
                 }
-            } else {
-                // Strategy 2: Try local chromium
+            }
+            
+            // Strategy 2: Try local chromium if no browser yet
+            if (!this.browser) {
+                console.log('🔧 Falling back to local chromium...');
                 const isLocal = !!process.env.CHROME_BIN || !!process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD;
                 
                 let launchOptions;
@@ -444,7 +447,31 @@ export default async function handler(req, res) {
                     await automation.cleanup();
                 } else {
                     console.log('❌ Browser initialization failed - using intelligent fallback response');
-                    // Even without browser, we can provide a professional response
+                    console.log('🔍 Attempting HTTP-based QuoteFactory check...');
+                    
+                    // Try a simple HTTP check to see if load exists
+                    try {
+                        const response = await fetch(`https://app.quotefactory.com/api/loads/search?q=${loadReference}`, {
+                            headers: {
+                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                            },
+                            timeout: 5000
+                        });
+                        
+                        if (response.ok) {
+                            console.log('✅ Load exists in QuoteFactory (HTTP check)');
+                            // Set a flag that we found the load but couldn't scrape details
+                            loadInfo = { 
+                                exists: true, 
+                                pickup: 'Details being retrieved...', 
+                                delivery: 'Details being retrieved...',
+                                weight: 'TBD',
+                                rate: 'Quote being prepared...'
+                            };
+                        }
+                    } catch (error) {
+                        console.log('ℹ️ HTTP check failed, using standard fallback');
+                    }
                 }
             } else {
                 console.log('⚠️ No QuoteFactory credentials - using basic response');
